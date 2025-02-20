@@ -1,14 +1,14 @@
 - name: Deploy Zabbix Monitoring Server on Ubuntu 24.04
   hosts: zbxhost
   become: yes
-  remote_user: zbxadm # ssh user 
+  remote_user: zbxadm # Here insert your user for SSH connection
   vars:
-    ansible_ssh_pass: Pass_12345 # ssh user's password
-    ansible_become_password: Pass_12345 # remote sudoer user's password
-    db_name: zabbix # database name 
-    db_user: zabbix # database user
-    db_password: dbpass_12345 # database user's password
-    mysql_root_password: dbroot_12345 # MySQL administrator's password
+    ansible_ssh_pass: Pass_12345 # Here insert your ssh user password
+    ansible_become_password: Pass_12345 # Here insert sudoer user password
+    db_name: zabbix # Here insert your database name 
+    db_user: zabbix # Here insert your database user
+    db_password: dbpass_12345 # Here insert your database user's password
+    mysql_root_password: dbroot_12345 # Here insert your MySQL administrator's password
 
   tasks:
     - name: Install MySQL server
