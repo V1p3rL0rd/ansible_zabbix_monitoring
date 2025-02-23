@@ -1,4 +1,4 @@
-- name: Deploy Zabbix Monitoring Server on Ubuntu 24.04
+- name: Deploy Zabbix Monitoring Server on Ubuntu
   hosts: zbxhost
   become: yes
   remote_user: zbxadm # Here insert your user for SSH connection
