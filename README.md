@@ -17,3 +17,4 @@ The script is executed in several stages:
 12) Configure the database for Zabbix server
 13) Start Zabbix server and agent processes
 14) Enable Zabbix server, agent, and Apache at boot
+15) Secure Apache with selfsigned SSL (optional)
