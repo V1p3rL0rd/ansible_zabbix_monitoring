@@ -1,0 +1,194 @@
+- name: Deploy Zabbix Monitoring Server Ubuntu
+  hosts: zbxhost
+  become: yes
+  remote_user: zbxadm # ssh user 
+  vars:
+    ansible_ssh_pass: Pass_12345 # ssh user's password
+    ansible_become_password: Pass_12345 # remote sudoer user's password
+    db_name: zabbix # database name 
+    db_user: zabbix # database user
+    db_password: dbpass_12345 # database user's password
+    mysql_root_password: dbroot_12345 # MySQL administrator's password
+
+  tasks:
+    - name: Verify Ubuntu version
+      shell: lsb_release -a
+      register: ubuntu_version
+      changed_when: false
+
+    - name: Debug Ubuntu version
+      debug:
+        var: ubuntu_version.stdout
+
+    - name: Ensure main and universe repositories are enabled
+      blockinfile:
+        path: /etc/apt/sources.list
+        block: |
+          deb http://archive.ubuntu.com/ubuntu noble main universe
+          deb http://archive.ubuntu.com/ubuntu noble-updates main universe
+          deb http://archive.ubuntu.com/ubuntu noble-security main universe
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - ENABLE MAIN AND UNIVERSE REPOS"
+        create: yes
+      notify: Update apt cache
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      when: False  # This task is triggered by the handler
+
+    - name: Install MySQL server
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: Secure MySQL installation
+      shell: |
+        sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mysql_root_password }}';"
+        sudo mysql -e "DELETE FROM mysql.user WHERE User='';"
+        sudo mysql -e "DROP DATABASE IF EXISTS test;"
+        sudo mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+        sudo mysql -e "FLUSH PRIVILEGES;"
+
+    - name: Install Zabbix repository
+      shell: |
+        wget https://repo.zabbix.com/zabbix/7.2/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.2+ubuntu24.04_all.deb
+        dpkg -i zabbix-release_latest_7.2+ubuntu24.04_all.deb
+        apt update
+
+    - name: Install Zabbix server, frontend, agent
+      apt:
+        name:
+          - zabbix-server-mysql
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+          - zabbix-sql-scripts
+          - zabbix-agent
+        state: present
+
+    - name: Install required Python MySQL module
+      apt:
+        name: python3-pymysql
+        state: present
+
+    - name: Create initial database
+      shell: "sudo mysql -u root -p{{ mysql_root_password }} -e \"CREATE DATABASE {{ db_name }} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;\""
+
+    - name: Create MySQL user for Zabbix
+      shell: "sudo mysql -u root -p{{ mysql_root_password }} -e \"CREATE USER '{{ db_user }}'@'localhost' IDENTIFIED BY '{{ db_password }}';\""
+
+    - name: Grant privileges on Zabbix database
+      shell: "sudo mysql -u root -p{{ mysql_root_password }} -e \"GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'localhost';\""
+
+    - name: Set log_bin_trust_function_creators option
+      shell: "sudo mysql -u root -p{{ mysql_root_password }} -e \"SET GLOBAL log_bin_trust_function_creators = 1;\""
+
+    - name: Import initial schema and data
+      shell: "zcat /usr/share/zabbix/sql-scripts/mysql/server.sql.gz | sudo mysql --default-character-set=utf8mb4 -u{{ db_user }} -p{{ db_password }} {{ db_name }}"
+
+    - name: Disable log_bin_trust_function_creators option
+      shell: "sudo mysql -u root -p{{ mysql_root_password }} -e \"SET GLOBAL log_bin_trust_function_creators = 0;\""
+
+    - name: Configure the database for Zabbix server
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^# DBPassword='
+        line: 'DBPassword={{ db_password }}'
+
+    - name: Install OpenSSL
+      apt:
+        name: openssl
+        state: present
+
+    - name: Create SSL directory
+      file:
+        path: /etc/apache2/ssl
+        state: directory
+        mode: '0755'
+
+    - name: Generate self-signed SSL certificate with OpenSSL
+      shell: |
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+          -keyout /etc/apache2/ssl/zabbix-selfsigned.key \
+          -out /etc/apache2/ssl/zabbix-selfsigned.crt \
+          -subj "/C=US/ST=California/L=San Francisco/O=Zabbix/CN={{ ansible_fqdn }}"
+
+    - name: Configure Apache to use SSL
+      blockinfile:
+        path: /etc/apache2/sites-available/default-ssl.conf
+        block: |
+          <VirtualHost *:443>
+              ServerAdmin webmaster@localhost
+              DocumentRoot /usr/share/zabbix
+
+              SSLEngine on
+              SSLCertificateFile /etc/apache2/ssl/zabbix-selfsigned.crt
+              SSLCertificateKeyFile /etc/apache2/ssl/zabbix-selfsigned.key
+
+              <Directory /usr/share/zabbix>
+                  Options FollowSymLinks
+                  AllowOverride None
+                  Require all granted
+              </Directory>
+
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - ZABBIX SSL CONFIG"
+
+    - name: Enable SSL module and site
+      shell: |
+        a2enmod ssl
+        a2ensite default-ssl.conf
+      args:
+        creates: /etc/apache2/sites-enabled/default-ssl.conf
+
+    - name: Force HTTP to HTTPS redirect
+      blockinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        block: |
+          <VirtualHost *:80>
+              ServerAdmin webmaster@localhost
+              DocumentRoot /usr/share/zabbix
+
+              RewriteEngine On
+              RewriteCond %{HTTPS} off
+              RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - FORCE HTTPS REDIRECT"
+
+    - name: Enable rewrite module
+      shell: |
+        a2enmod rewrite
+      args:
+        creates: /etc/apache2/mods-enabled/rewrite.load
+
+    - name: Restart Apache to apply changes
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Start Zabbix server and agent processes
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      with_items:
+        - zabbix-server
+        - zabbix-agent
+        - apache2
+
+    - name: Enable Zabbix server, agent, and Apache at boot
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+      with_items:
+        - zabbix-server
+        - zabbix-agent
+        - apache2
+
+  handlers:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
