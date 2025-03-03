@@ -1,7 +1,8 @@
 # Ansible zabbix monitoring deplyment
-This simple Ansible playbook automates the process of installing the Zabbix monitoring server.
+This is a very simple Ansible playbook consisting of two files 
+will help you quickly deploy a zabbix monitoring server
 
-The script is executed in several stages:
+The playbook is executed in several stages:
 
 1) Install MySQL server
 2) Secure MySQL installation
