@@ -1,6 +1,6 @@
 # Ansible zabbix monitoring deplyment
-This is a very simple Ansible playbook consisting of two files 
-will help you quickly deploy a zabbix monitoring server
+This is a very simple Ansible playbook will help you quickly deploy 
+a zabbix monitoring server with selfsigned SSL for Apache web server
 
 The playbook is executed in several stages:
 
