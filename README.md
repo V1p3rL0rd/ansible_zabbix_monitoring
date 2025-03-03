@@ -2,7 +2,7 @@
 This is a very simple Ansible playbook will help you quickly deploy 
 a zabbix monitoring server with selfsigned SSL for Apache web
 
-The playbook is executed in several stages:
+The playbook contains several tasks:
 
 1) Install MySQL server
 2) Secure MySQL installation
